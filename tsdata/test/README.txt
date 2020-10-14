@@ -1,0 +1,1 @@
+Extract content of "traffic_signs_test.zip" into this directory!
