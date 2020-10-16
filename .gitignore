@@ -17,3 +17,9 @@ __pycache__/
 
 # Non-Public Stuff
 /00_NON-PUBLIC/
+
+# Model checkpoints
+/model_chkpts
+
+# Pre-processed cached data
+/tsdata/cache__*
