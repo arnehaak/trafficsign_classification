@@ -11,9 +11,9 @@ Tested with Python 3.7.7 (AMD64) on Windows 10 with Anaconda.
 
 Environment Setup with Anaconda:
 
-    conda create --name arnepy37 python=3.7 anaconda
+    conda create --name tspy37 python=3.7 anaconda
     
-    conda activate arnepy37
+    conda activate tspy37
     
     conda install -c anaconda tensorflow-gpu
     conda install -c anaconda keras
