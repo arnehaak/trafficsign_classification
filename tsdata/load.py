@@ -30,8 +30,11 @@ class DataPipelineConfig:
     return config_serialized
   
   def get_keras_input_shape(self):
-    return (self.target_height, self.target_width, 3 if self.is_color_mode else 1)
-  
+    if self.is_color_mode:
+      return (self.target_height, self.target_width, 3)
+    else:
+      return (self.target_height, self.target_width)
+ 
 
 class CacheFileNotFound(Exception):
   pass
@@ -65,7 +68,53 @@ def save_to_cache(dpconfig, set, images, labels):
   cachefile = get_cachefile(dpconfig, set)
   print(f"Saving to cache file {cachefile}...")
   np.savez(cachefile, images = images, labels = labels)
+ 
+  
+def count_files_in_dir(dir, fileext_expected):
+  num_files = 0
+  
+  for folder, _, files in os.walk(dir):
+    for file in files:
+      fileext_actual = os.path.splitext(file)[1]
+      
+      if fileext_actual.lower() != fileext_expected.lower():
+        continue
+            
+      num_files += 1
+      
+  return num_files
+  
+  
+class ImageContainer:
+  def __init__(self, num_prealloc, sample_shape, dtype = np.float):
+    prealloc_shape = [num_prealloc] + list(sample_shape)
 
+    self._images = np.empty(shape = prealloc_shape, dtype = dtype)
+
+    self._numImages = 0
+  
+    self._sample_shape = sample_shape
+
+    
+  def append(self, new_sample):
+  
+    if self._sample_shape != new_sample.shape:
+      raise RuntimeError("Invalid sample shape!")
+      
+    if new_sample.dtype != self._images.dtype:
+      raise RuntimeError("Invalid data type!")
+
+    if self._numImages == self._images.shape[0]:
+      raise RuntimeError("Capacity exceeded!")
+      
+    self._images[self._numImages, Ellipsis] = new_sample
+      
+    self._numImages += 1
+      
+        
+  def get_images(self):
+    return self._images[0:self._numImages, Ellipsis]
+  
   
 def load_data_fresh(dpconfig, set):
 
@@ -83,7 +132,11 @@ def load_data_fresh(dpconfig, set):
  
   print(f"Reading images from '{dataroot}' directory...\n")
     
-  images = []
+  # Have a rough estimation about how much memory we will need based on the
+  # number of files
+  num_files = count_files_in_dir(dataroot, ".ppm")    
+
+  imageContainer = ImageContainer(num_files * 2, dpconfig.get_keras_input_shape())
   labels = []
     
   for folder, _, files in os.walk(dataroot):
@@ -107,36 +160,37 @@ def load_data_fresh(dpconfig, set):
         raise RuntimeError(f"Invalid label for file: {filename_full}")
       
       curr_img = load_image(dpconfig, filename_full)
-            
-      images.append(curr_img)
+
+      # Plain image
+      imageContainer.append(curr_img)
       labels.append(curr_label)
 
-      # Horizontal mirroring
+      # Augmentation: Horizontal mirroring
       if dpconfig.augmentation in ["fliplr", "turnimprove"]:
         if is_left_right_flippable[curr_label]:
-          images.append(np.flip(curr_img, axis = 0))
+          imageContainer.append(np.fliplr(curr_img))
           labels.append(curr_label)
           
       # Additional augmentation for left and right turns
       if dpconfig.augmentation == "turnimprove":
         if curr_label == 12:      # left hand curve
-          images.append(np.flip(curr_img, axis = 0))
+          imageContainer.append(np.fliplr(curr_img))
           labels.append(13)
         elif curr_label == 13:    # right hand curve
-          images.append(np.flip(curr_img, axis = 0))
+          imageContainer.append(np.fliplr(curr_img))
           labels.append(12)
       
-  # Shuffle
-  zipped = list(zip(images, labels))
-  random.shuffle(zipped, random = lambda: 0.1337)
-  images, labels = zip(*zipped)
-      
-  if len(images) == 0:
+  if len(labels) == 0:
     raise RuntimeError(f"Images of the {set} dataset are unavailable! Please check the instructions in the README file regarding dataset extraction!")
       
-  images = np.concatenate(images, axis=0)
+  images = imageContainer.get_images()
   labels = np.asarray(labels)
   
+  # Shuffle
+  shuffled_indices = np.random.permutation(len(labels))
+  images = images[shuffled_indices, Ellipsis]  
+  labels = labels[shuffled_indices]
+
   save_to_cache(dpconfig, set, images, labels)
       
   return images, labels
@@ -150,12 +204,11 @@ def load_image(dpconfig, image_filename):
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
   else:
   
-    # vvvvvvvvvvvvvvvvvvvv
+    # Do CLAHE contrast improvement
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     clahe = cv2.createCLAHE(clipLimit=2.0,tileGridSize=(4,4))
     lab[...,0] = clahe.apply(lab[...,0])    
     img = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)    
-    # ^^^^^^^^^^^^^^^^^^^^
   
     ##  # Work with RGB, not OpenCV's default BGR
     ##  img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -164,12 +217,7 @@ def load_image(dpconfig, image_filename):
   img = img / 255.0
     
   img = cv2.resize(img, (dpconfig.target_width, dpconfig.target_height), interpolation = cv2.INTER_LINEAR)
-
-  # Make image stackable
-  if dpconfig.is_color_mode:
-    img = img.reshape(1, dpconfig.target_height, dpconfig.target_width, 3)
-  else:
-    img = img.reshape(1, dpconfig.target_height, dpconfig.target_width)
+  
   return img
 
   
@@ -224,3 +272,28 @@ def get_is_left_right_flippable():
     True,   # rough road
     True,   # traffic lights
     False ] # school ahead
+
+    
+    
+    
+def main():
+
+  dpconfig = DataPipelineConfig(
+    target_width  = 128,
+    target_height = 128,
+    is_color_mode = False,
+    augmentation  = "fliplr"
+  ) 
+  
+  image_filename = "../train/traffic_signs_train/germany/6/00003_00029.ppm"
+  
+  img = load_image(dpconfig, image_filename)
+  
+  cv2.imshow("img", img)
+  
+  cv2.waitKey(0)
+  cv2.destroyAllWindows()
+
+  
+if __name__ == "__main__":
+  main()

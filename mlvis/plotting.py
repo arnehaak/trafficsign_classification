@@ -3,13 +3,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def plot_image(i, class_names, predictions_array, true_label, img):
-  true_label, img = true_label[i], img[i]
+def plot_image(class_names, predictions_array, true_label, img):
+  
   plt.grid(False)
   plt.xticks([])
   plt.yticks([])
 
-  plt.imshow(img, cmap=plt.cm.binary)
+  if (len(img.shape) == 2) or ((len(img.shape) == 3) and (img.shape[2] == 1)):
+    colormap = 'gray'
+  else:
+    colormap = None
+  
+  plt.imshow(img, cmap=colormap)
 
   predicted_label = np.argmax(predictions_array)
   if predicted_label == true_label:
@@ -23,10 +28,9 @@ def plot_image(i, class_names, predictions_array, true_label, img):
                                 color=color)
 
                                 
-def plot_value_array(i, class_names, predictions_array, true_label):
+def plot_value_array(class_names, predictions_array, true_label):
   num_classes = len(class_names)
 
-  true_label = true_label[i]
   plt.grid(False)
   plt.xticks(range(num_classes))
   plt.yticks([])
